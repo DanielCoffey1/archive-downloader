@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+import tkinter as tk
 from urllib.error import HTTPError
 from archive_downloader import download, identifier, local_name, safe_target, Paused, App
 
@@ -68,5 +69,59 @@ class Tests(unittest.TestCase):
         with self.assertRaises(ValueError): identifier('https://evil.example/details/test')
         self.assertEqual(str(local_name('CON.zip')), '~reserved~CON.zip')
         self.assertTrue(safe_target(self.folder, 'a:b.zip').is_relative_to(self.folder))
+
+class QueueRemovalTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.addCleanup(self.close_root)
+        self.app = App(self.root)
+        self.app.entries = [dict(name=name, size='10', queued=True, status='Queued')
+                            for name in ('a.zip', 'notes.txt', 'b.zip', 'c.zip')]
+        self.app.render()
+
+    def close_root(self):
+        self.root.update_idletasks()
+        for callback in self.root.tk.call('after', 'info'):
+            self.root.after_cancel(callback)
+        self.root.destroy()
+
+    def test_remove_filtered_nonadjacent_rows_and_save(self):
+        self.app.filter.set('.zip')
+        self.app.tree.selection_set('0', '3')
+        self.app.remove_selected()
+        self.assertEqual([e['name'] for e in self.app.entries], ['notes.txt', 'b.zip'])
+        self.assertEqual(self.app.tree.get_children(), ('1',))
+        self.assertIn('2 queued / 2 files', self.app.count['text'])
+        with tempfile.TemporaryDirectory() as folder:
+            import json
+            self.app.folder.set(folder)
+            self.app.item = 'test'
+            self.app.save()
+            saved = json.loads((Path(folder) / 'test/.ia-downloader/queue.json').read_text())
+            self.assertEqual([e['name'] for e in saved['files']], ['notes.txt', 'b.zip'])
+
+    def test_busy_and_empty_selection_do_not_remove(self):
+        self.app.remove_selected()
+        self.assertEqual(len(self.app.entries), 4)
+        self.app.tree.selection_set('0')
+        self.app.set_busy(True)
+        self.app.remove_selected()
+        self.assertEqual(len(self.app.entries), 4)
+        self.assertTrue(self.app.removebutton.instate(['disabled']))
+        self.app.set_busy(False)
+        self.assertTrue(self.app.removebutton.instate(['!disabled']))
+
+    def test_delete_shortcut_can_remove_all_rows(self):
+        self.root.deiconify()
+        self.root.update()
+        self.app.tree.selection_set(*self.app.tree.get_children())
+        self.app.tree.focus_force()
+        self.app.tree.event_generate('<Delete>')
+        self.root.update()
+        self.assertEqual(self.app.entries, [])
+        self.assertEqual(self.app.tree.get_children(), ())
+        self.assertTrue(self.app.removebutton.instate(['disabled']))
+
 
 if __name__ == '__main__': unittest.main()
