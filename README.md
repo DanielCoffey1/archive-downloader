@@ -4,8 +4,8 @@ Double-click **ArchiveDownloader.exe**. No Python installation is required on Wi
 
 1. Your PSP item URL is already filled in; you can replace it with any Archive.org item URL.
 2. For account-restricted files, choose **Sign in…** and enter your email/password in the app. Credentials are sent directly to Archive.org over HTTPS. The password and login session are not saved to disk. Sign in again after reopening the app.
-3. Click **Load files**. Every file in the item is queued automatically, including metadata and torrent files.
-4. Choose a download folder. The app creates a subfolder named after the item identifier.
+3. Click **Load files** to add the item's files to the current list. Enter another item URL and load again to combine multiple items. Existing rows and queue choices are kept; files already listed are skipped. New files are queued automatically, including metadata and torrent files. The **Item** column identifies each file's source.
+4. Choose a download folder. The app creates a separate subfolder for each item, so files with the same name from different items stay separate.
 5. Click **Start / Resume**.
 
 The supplied PSP item listed 764 files totaling about 440.5 GiB when checked. Most game files are marked as requiring account access. Allow enough disk space for your chosen files.
@@ -19,7 +19,7 @@ The supplied PSP item listed 764 files totaling about 440.5 GiB when checked. Mo
 - Select rows with a click, Ctrl-click, or Shift-click, then click **Remove selected** or press **Delete** to remove them from the download list. This also works on filtered results. Files already on disk are kept. Pause an active run before removing rows. Load files again to restore the full list.
 - **Pause** keeps partial files. The current network read may need up to 30 seconds to stop.
 - **Start / Resume** retries failures and skips existing files only after checking their size and available SHA-1/MD5 checksum.
-- To resume after closing, load the same item and choose the same folder, or use **Open saved queue…** and select `<download folder>/<item>/.ia-downloader/queue.json`.
+- To resume after closing, load the same items and choose the same folder, or use **Open saved queue…** and select `<download folder>/<first loaded item>/.ia-downloader/queue.json`. This saves the entire combined list. Opening a saved queue replaces the current list; subsequent **Load files** calls append to it. Older single-item saved queues are also supported.
 - The queue is saved when downloads start and when the run finishes or pauses. Changes made without starting a run are not saved.
 
 Files download individually, sequentially, with retries and backoff. Nothing is combined or extracted. The app does not download a collection's child items automatically; use a specific item URL.

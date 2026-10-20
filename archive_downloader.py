@@ -234,7 +234,7 @@ class App:
         box = ttk.Frame(root, padding=20)
         box.pack(fill='both', expand=True)
         ttk.Label(box, text='Archive Downloader', font=('Segoe UI', 22, 'bold')).pack(anchor='w')
-        ttk.Label(box, text='Download an entire item, one file at a time. No server-side ZIP required.').pack(anchor='w', pady=(2, 16))
+        ttk.Label(box, text='Combine Archive.org items in one download list. Files download one at a time.').pack(anchor='w', pady=(2, 16))
         row = ttk.Frame(box); row.pack(fill='x', pady=4)
         ttk.Label(row, text='Item URL', width=13).pack(side='left')
         self.urlentry = ttk.Entry(row, textvariable=self.url); self.urlentry.pack(side='left', fill='x', expand=True)
@@ -251,8 +251,8 @@ class App:
         self.allbutton = ttk.Button(row, text='Queue shown', command=lambda: self.select(True)); self.allbutton.pack(side='left', padx=4)
         self.nonebutton = ttk.Button(row, text='Unqueue shown', command=lambda: self.select(False)); self.nonebutton.pack(side='left')
         area = ttk.Frame(box); area.pack(fill='both', expand=True)
-        self.tree = ttk.Treeview(area, columns=('queue', 'name', 'size', 'status'), show='headings', selectmode='extended')
-        for col, title, width in [('queue','Queue',60),('name','File',570),('size','Size',100),('status','Status',160)]:
+        self.tree = ttk.Treeview(area, columns=('queue', 'item', 'name', 'size', 'status'), show='headings', selectmode='extended')
+        for col, title, width in [('queue','Queue',60),('item','Item',190),('name','File',380),('size','Size',100),('status','Status',160)]:
             self.tree.heading(col, text=title); self.tree.column(col, width=width, stretch=col in ('name','status'))
         scroll = ttk.Scrollbar(area, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
@@ -299,7 +299,7 @@ class App:
         self.status.set('Loading the complete file list…')
         def work():
             data = self.client.metadata(item)
-            entries = [dict(f, queued=True, status='Account required' if str(f.get('private', '')).lower() == 'true' else 'Queued') for f in data['files'] if f.get('name')]
+            entries = [dict(f, item=item, queued=True, status='Account required' if str(f.get('private', '')).lower() == 'true' else 'Queued') for f in data['files'] if f.get('name')]
             seen = set()
             for e in entries:
                 name = str(local_name(e['name'])).casefold()
@@ -309,12 +309,28 @@ class App:
             self.events.put(('loaded', (item, entries)))
         self.background(work)
 
+    def append_loaded(self, item, entries):
+        sources = {e.get('item', self.item) for e in self.entries}
+        if any(source != item and source.casefold() == item.casefold() for source in sources):
+            raise ValueError('Item identifiers conflict on Windows: ' + item)
+        existing = {(e.get('item', self.item), str(local_name(e['name'])).casefold()) for e in self.entries}
+        added = 0
+        for e in entries:
+            key = (item, str(local_name(e['name'])).casefold())
+            if key not in existing:
+                self.entries.append(dict(e, item=item))
+                existing.add(key)
+                added += 1
+        if not self.item: self.item = item
+        self.render()
+        self.status.set(f'Added {added:,} files from {item}; skipped {len(entries) - added:,} already listed. {len(self.entries):,} files in the combined list.')
+
     def render(self):
         self.tree.delete(*self.tree.get_children())
         needle = self.filter.get().casefold()
         for i, e in enumerate(self.entries):
             if needle in e['name'].casefold():
-                self.tree.insert('', 'end', iid=str(i), values=('Yes' if e['queued'] else '—', e['name'], size_text(int(e.get('size', 0) or 0)), e['status']))
+                self.tree.insert('', 'end', iid=str(i), values=('Yes' if e['queued'] else '—', e.get('item', self.item), e['name'], size_text(int(e.get('size', 0) or 0)), e['status']))
         selected = [e for e in self.entries if e['queued']]
         total = sum(int(e.get('size', 0) or 0) for e in selected)
         self.count.configure(text=f'{len(selected):,} queued / {len(self.entries):,} files • {size_text(total)} listed • Double-click a row to toggle it')
@@ -351,7 +367,10 @@ class App:
 
     def open_folder(self):
         path = Path(self.folder.get())
-        if self.item and (path / self.item).is_dir(): path /= self.item
+        sources = {e.get('item', self.item) for e in self.entries}
+        if len(sources) == 1:
+            item = next(iter(sources))
+            if (path / item).is_dir(): path /= item
         if path.is_dir(): os.startfile(path)
 
     def login(self):
@@ -379,7 +398,7 @@ class App:
         path = safe_target(root, '.ia-downloader/queue.json')
         path.parent.mkdir(parents=True, exist_ok=True)
         temp = path.with_suffix('.tmp')
-        temp.write_text(json.dumps({'version': 1, 'item': self.item, 'folder': str(Path(self.folder.get()).resolve()), 'files': self.entries}, indent=2), encoding='utf-8')
+        temp.write_text(json.dumps({'version': 2, 'item': self.item, 'folder': str(Path(self.folder.get()).resolve()), 'files': self.entries}, indent=2), encoding='utf-8')
         temp.replace(path)
 
     def restore(self):
@@ -390,9 +409,16 @@ class App:
             item = identifier(data['item'])
             entries = data['files']
             seen = set()
+            sources = {}
             for e in entries:
-                key = str(local_name(e['name'])).casefold()
-                if key in seen or key.split(os.sep)[0] == '.ia-downloader': raise ValueError('Conflicting filenames.')
+                source = identifier(e.get('item', item))
+                if source.casefold() in sources and sources[source.casefold()] != source:
+                    raise ValueError('Conflicting item identifiers.')
+                sources[source.casefold()] = source
+                e['item'] = source
+                name = str(local_name(e['name'])).casefold()
+                key = (source, name)
+                if key in seen or name.split(os.sep)[0] == '.ia-downloader': raise ValueError('Conflicting filenames.')
                 seen.add(key)
                 e['queued'] = bool(e.get('queued', True)); e['status'] = 'Queued'
             self.item, self.entries = item, entries
@@ -420,7 +446,7 @@ class App:
                     self.events.put(('progress', (number, len(selected), entry['name'], done, total)))
                 progress(0, int(entry.get('size', 0) or 0))
                 try:
-                    result = download(self.client, item, entry, folder, self.stop, progress)
+                    result = download(self.client, entry.get('item', item), entry, folder, self.stop, progress)
                 except Paused:
                     self.events.put(('row', (i, 'Paused'))); break
                 except Exception as e:
@@ -437,8 +463,9 @@ class App:
             try: kind, data = self.events.get_nowait()
             except queue.Empty: break
             if kind == 'loaded':
-                self.item, self.entries = data; self.render()
-                self.status.set(f'Loaded {len(self.entries):,} files. Choose a folder, then Start / Resume.')
+                try: self.append_loaded(*data)
+                except ValueError as e:
+                    self.status.set(str(e)); messagebox.showerror('Cannot add item', str(e))
             elif kind == 'signedin':
                 self.loginbutton.configure(text='Signed in ✓')
                 self.status.set('Signed in for this app session. Load the item or retry your queue.')
