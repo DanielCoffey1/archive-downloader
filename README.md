@@ -16,6 +16,7 @@ The supplied PSP item listed 764 files totaling about 440.5 GiB when checked. Mo
 - **Queue shown** and **Unqueue shown** apply to all currently visible rows. Filtering alone does not change the queue.
 - To select only ZIPs: clear the filter, click Unqueue shown, filter `.zip`, then click Queue shown.
 - Double-click a file to toggle it.
+- Select rows with a click, Ctrl-click, or Shift-click, then click **Remove selected** or press **Delete** to remove them from the download list. This also works on filtered results. Files already on disk are kept. Pause an active run before removing rows. Load files again to restore the full list.
 - **Pause** keeps partial files. The current network read may need up to 30 seconds to stop.
 - **Start / Resume** retries failures and skips existing files only after checking their size and available SHA-1/MD5 checksum.
 - To resume after closing, load the same item and choose the same folder, or use **Open saved queue…** and select `<download folder>/<item>/.ia-downloader/queue.json`.

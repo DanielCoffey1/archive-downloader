@@ -258,6 +258,10 @@ class App:
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side='left', fill='both', expand=True); scroll.pack(side='right', fill='y')
         self.tree.bind('<Double-1>', self.toggle)
+        self.tree.bind('<Delete>', self.remove_selected)
+        self.tree.bind('<<TreeviewSelect>>', self.update_remove_button)
+        self.removebutton = ttk.Button(box, text='Remove selected', command=self.remove_selected, state='disabled')
+        self.removebutton.pack(anchor='w', pady=(8, 0))
         self.count = ttk.Label(box); self.count.pack(anchor='w', pady=(8, 3))
         self.bar = ttk.Progressbar(box, maximum=100); self.bar.pack(fill='x', pady=4)
         ttk.Label(box, textvariable=self.status, wraplength=1000).pack(anchor='w', pady=4)
@@ -274,6 +278,7 @@ class App:
         self.busy = value
         for widget in self.controls:
             widget.configure(state='disabled' if value else 'normal')
+        self.update_remove_button()
 
     def background(self, fn):
         self.set_busy(True)
@@ -313,6 +318,20 @@ class App:
         selected = [e for e in self.entries if e['queued']]
         total = sum(int(e.get('size', 0) or 0) for e in selected)
         self.count.configure(text=f'{len(selected):,} queued / {len(self.entries):,} files • {size_text(total)} listed • Double-click a row to toggle it')
+
+    def update_remove_button(self, event=None):
+        self.removebutton.configure(state='normal' if not self.busy and self.tree.selection() else 'disabled')
+
+    def remove_selected(self, event=None):
+        if self.busy: return 'break'
+        indices = sorted((int(iid) for iid in self.tree.selection()), reverse=True)
+        if not indices: return 'break'
+        for i in indices:
+            del self.entries[i]
+        self.render()
+        self.update_remove_button()
+        self.status.set(f'Removed {len(indices):,} file(s) from the list. Files on disk were kept. Load files again to restore removed items.')
+        return 'break'
 
     def select(self, selected):
         if self.busy: return
