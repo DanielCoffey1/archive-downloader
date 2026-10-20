@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 import tkinter as tk
+from unittest.mock import patch
 from urllib.error import HTTPError
 from archive_downloader import download, identifier, local_name, safe_target, Paused, App
 
@@ -111,6 +112,62 @@ class QueueRemovalTests(unittest.TestCase):
         self.assertTrue(self.app.removebutton.instate(['disabled']))
         self.app.set_busy(False)
         self.assertTrue(self.app.removebutton.instate(['!disabled']))
+
+    def load_item(self, item, names):
+        self.app.url.set(item)
+        with patch.object(self.app.client, 'metadata', return_value={'files': [dict(name=n) for n in names]}), \
+                patch.object(self.app, 'background', side_effect=lambda fn: fn()):
+            self.app.load()
+        self.app.poll()
+
+    def test_load_appends_and_preserves_existing_choices(self):
+        self.app.entries = []
+        self.load_item('first', ['game.zip', 'notes.txt'])
+        original = self.app.entries[0]
+        original.update(queued=False, status='Complete')
+        self.app.filter.set('.zip')
+        self.load_item('second', ['game.zip'])
+        self.load_item('first', ['game.zip', 'notes.txt', 'new.zip'])
+        self.assertEqual([(e['item'], e['name']) for e in self.app.entries],
+                         [('first', 'game.zip'), ('first', 'notes.txt'), ('second', 'game.zip'), ('first', 'new.zip')])
+        self.assertIs(self.app.entries[0], original)
+        self.assertFalse(original['queued'])
+        self.assertEqual(original['status'], 'Complete')
+        self.assertEqual(self.app.item, 'first')
+        self.app.tree.selection_set('0')
+        self.app.remove_selected()
+        self.load_item('first', ['game.zip'])
+        self.assertEqual(len(self.app.entries), 4)
+
+    def test_combined_queue_roundtrip_and_download_destinations(self):
+        self.app.entries = []
+        self.app.append_loaded('first', [dict(ENTRY, queued=True, status='Queued')])
+        self.app.append_loaded('second', [dict(ENTRY, queued=True, status='Queued')])
+        with tempfile.TemporaryDirectory() as folder:
+            self.app.folder.set(folder)
+            self.app.save()
+            path = Path(folder) / 'first/.ia-downloader/queue.json'
+            self.app.entries = []
+            with patch('archive_downloader.filedialog.askopenfilename', return_value=str(path)):
+                self.app.restore()
+            self.assertEqual([e['item'] for e in self.app.entries], ['first', 'second'])
+            self.app.client = FakeClient()
+            with patch.object(self.app, 'background', side_effect=lambda fn: fn()):
+                self.app.start()
+            self.app.poll()
+            for item in ('first', 'second'):
+                self.assertEqual((Path(folder) / item / ENTRY['name']).read_bytes(), PAYLOAD)
+
+    def test_legacy_queue_restore(self):
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'queue.json'
+            path.write_text(json.dumps(dict(version=1, item='legacy', folder=folder, files=self.app.entries)))
+            with patch('archive_downloader.filedialog.askopenfilename', return_value=str(path)):
+                self.app.restore()
+            self.assertEqual({e['item'] for e in self.app.entries}, {'legacy'})
+            self.load_item('second', ['a.zip'])
+            self.assertEqual(len(self.app.entries), 5)
 
     def test_delete_shortcut_can_remove_all_rows(self):
         self.root.deiconify()
